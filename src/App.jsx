@@ -84,7 +84,13 @@ async function loadOrSeed(key, seed) {
   try {
     const res = await fetch(`${FIREBASE_URL}/${key}.json`);
     const data = await res.json();
-    if (data !== null && data !== undefined) return data;
+    if (data !== null && data !== undefined) {
+      // إذا المفروض تكون قائمة (array) بس البيانات المخزنة تلفت وصارت شي ثاني، نرجع قائمة فارغة بدل ما يعلق التطبيق
+      if (Array.isArray(seed) && !Array.isArray(data)) {
+        return Object.values(data || {});
+      }
+      return data;
+    }
   } catch (e) {
     // غير موجود بعد أو تعذر الاتصال، نرجع القيمة الافتراضية
   }
@@ -174,7 +180,7 @@ export default function SaloniPreview() {
 
   const addHold = (hold) => setHolds((prev) => [...prev, hold]);
   const removeHold = (id) => setHolds((prev) => prev.filter((h) => h.id !== id));
-  const activeHolds = holds.filter((h) => h.until > Date.now());
+  const activeHolds = (Array.isArray(holds) ? holds : []).filter((h) => h.until > Date.now());
 
   const togglePauseToday = (barberId) => {
     const today = todayStr();
