@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from "react";
-import { Scissors, User, Lock, MapPin, Check, X, Trash2, Power, ChevronRight, Send, Clock, Phone, Camera } from "lucide-react";
+import { Scissors, User, Lock, MapPin, Check, X, Trash2, Power, ChevronRight, Send, Clock, Phone, Camera, Sun, Moon } from "lucide-react";
 
-// ---------- ثيم موحد (نفس ألوان شاشة الترحيب الأولى) ----------
-const T = {
+// ---------- ثيم موحد (فاتح وداكن) ----------
+const LIGHT_THEME = {
   bg: "#EFF6F7",
   card: "#FFFFFF",
   primary: "#3E7CA6",
@@ -16,6 +16,26 @@ const T = {
   good: "#4C8B64",
   goodSoft: "#E3F0E7",
 };
+
+const DARK_THEME = {
+  bg: "#0F1A21",
+  card: "#182530",
+  primary: "#5AA3D0",
+  primaryDark: "#3E7CA6",
+  primarySoft: "#20323D",
+  text: "#E7F0F4",
+  muted: "#8FA5B0",
+  border: "#2A3B45",
+  danger: "#E07872",
+  dangerSoft: "#3A2422",
+  good: "#6FBA88",
+  goodSoft: "#20362A",
+};
+
+let T = { ...LIGHT_THEME };
+function applyTheme(isDark) {
+  Object.assign(T, isDark ? DARK_THEME : LIGHT_THEME);
+}
 
 // ملاحظة: رمز الإدارة الافتراضي هو "saif"، ويصير قابل للتغيير من داخل لوحة الإدارة نفسها ومحفوظ بالتخزين الدائم
 const SLOTS = (() => {
@@ -37,8 +57,12 @@ function to12h(t) {
   return `${h}:${m} ${period}`;
 }
 
+const pad2 = (n) => String(n).padStart(2, "0");
 const uid = () => Math.random().toString(36).slice(2, 9);
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
 
 // يتحقق إذا الوقت المحدد فات (بس لليوم الحالي - الأيام الجاية كلها متاحة عادي)
 function isPastSlot(date, time) {
@@ -62,7 +86,7 @@ function nextDays(n) {
   }
   return out;
 }
-const ds = (d) => d.toISOString().slice(0, 10);
+const ds = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
 // ---------- بيانات ابتدائية ----------
 const SEED_BARBERS = [
@@ -75,6 +99,7 @@ const K_BARBERS = "saloni-barbers";
 const K_APPTS = "saloni-appointments";
 const K_HOLDS = "saloni-holds";
 const K_ADMIN_PIN = "saloni-admin-pin";
+const K_DARK_MODE = "saloni-dark-mode";
 
 // رابط قاعدة بيانات Firebase Realtime Database - غيّره برابط مشروعك
 // مثال: https://saloni-xxxx-default-rtdb.firebaseio.com
@@ -124,23 +149,34 @@ export default function SaloniPreview() {
   const [appointments, setAppointmentsState] = useState([]);
   const [holds, setHoldsState] = useState([]); // حجوزات مؤقتة: {id, barberId, date, time, until}
   const [adminPin, setAdminPinState] = useState("saif");
+  const [darkMode, setDarkModeState] = useState(false);
   const [currentBarberId, setCurrentBarberId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [, forceTick] = useState(0);
 
+  // تحديث الثيم فوراً حسب الوضع الداكن قبل أي رسم بالشاشة
+  applyTheme(darkMode);
+
+  const setDarkMode = (val) => {
+    setDarkModeState(val);
+    saveKey(K_DARK_MODE, val);
+  };
+
   // تحميل البيانات المحفوظة عند فتح التطبيق لأول مرة
   React.useEffect(() => {
     (async () => {
-      const [b, a, h, p] = await Promise.all([
+      const [b, a, h, p, dm] = await Promise.all([
         loadOrSeed(K_BARBERS, SEED_BARBERS),
         loadOrSeed(K_APPTS, []),
         loadOrSeed(K_HOLDS, []),
         loadOrSeed(K_ADMIN_PIN, "saif"),
+        loadOrSeed(K_DARK_MODE, false),
       ]);
       setBarbersState(b);
       setAppointmentsState(a);
       setHoldsState(h);
       setAdminPinState(p);
+      setDarkModeState(dm);
       setLoading(false);
     })();
   }, []);
@@ -237,6 +273,8 @@ export default function SaloniPreview() {
           onBarber={() => setScreen("barberEntry")}
           onCustomer={() => setScreen("customer")}
           onAdmin={() => setScreen("admin")}
+          darkMode={darkMode}
+          onToggleDark={() => setDarkMode(!darkMode)}
         />
       )}
 
@@ -319,19 +357,39 @@ function Logo() {
   );
 }
 
-function WelcomeScreen({ onBarber, onCustomer, onAdmin }) {
+function WelcomeScreen({ onBarber, onCustomer, onAdmin, darkMode, onToggleDark }) {
   return (
-    <div className="screen-enter" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 32px" }}>
-      <div className="logo-breathe">
+    <div className="screen-enter" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", padding: "40px 32px", position: "relative" }}>
+      <button
+        onClick={onToggleDark}
+        aria-label="تبديل الوضع الداكن"
+        style={{
+          position: "absolute", top: 20, left: 20,
+          width: 40, height: 40, borderRadius: 20,
+          background: T.card, border: `1px solid ${T.border}`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+      >
+        {darkMode ? <Sun size={18} color={T.primary} /> : <Moon size={18} color={T.primary} />}
+      </button>
+
+      <div className="logo-breathe" style={{ marginTop: 60 }}>
         <Logo />
       </div>
-      <h1 style={{ color: T.primary, fontSize: 34, fontWeight: 800, margin: "16px 0 70px" }}>صالوني</h1>
+      <h1 style={{ color: T.primary, fontSize: 34, fontWeight: 800, margin: "-18px 0 0" }}>صالوني</h1>
 
-      <PrimaryBtn onClick={onBarber} icon={<Scissors size={19} />} label="أنا حلاق" />
-      <div style={{ height: 14 }} />
-      <OutlineBtn onClick={onCustomer} icon={<User size={19} />} label="أنا زبون" />
+      <div style={{ flex: 1 }} />
 
-      <div style={{ flex: 1, minHeight: 40 }} />
+      <div style={{ width: "100%", maxWidth: 280 }}>
+        <PrimaryBtn onClick={onBarber} icon={<Scissors size={19} />} label="أنا حلاق" />
+        <div style={{ height: 14 }} />
+        <OutlineBtn onClick={onCustomer} icon={<User size={19} />} label="أنا زبون" />
+      </div>
+      <p style={{ color: T.muted, fontSize: 14.5, textAlign: "center", margin: "18px 0 0", lineHeight: 1.6 }}>
+        أهلاً بيك، احجز موعدك عند حلاقك المفضل بكل سهولة
+      </p>
+
+      <div style={{ height: 40 }} />
       <button onClick={onAdmin} style={{ background: "none", border: "none", color: T.muted, fontSize: 12.5, marginBottom: 6 }}>
         دخول الإدارة
       </button>
