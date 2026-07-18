@@ -88,6 +88,17 @@ function nextDays(n) {
 }
 const ds = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
+// عدد الأيام المتبقية على اشتراك الحلاق (سالب إذا منتهي)
+function daysLeft(barber) {
+  if (!barber?.subscriptionUntil) return -1;
+  const until = new Date(barber.subscriptionUntil + "T23:59:59");
+  const diffMs = until.getTime() - Date.now();
+  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+}
+function isSubscriptionActive(barber) {
+  return daysLeft(barber) >= 0;
+}
+
 // ---------- بيانات ابتدائية ----------
 const SEED_BARBERS = [
   { id: "h1", name: "أبو علي", phone: "07701234567", address: "شارع الكرادة الرئيسي", approved: true, active: true },
@@ -247,7 +258,7 @@ export default function SaloniPreview() {
   }
 
   return (
-    <div dir="rtl" style={{ maxWidth: 420, margin: "0 auto", minHeight: "100vh", fontFamily: "'Tajawal','Segoe UI',sans-serif", background: T.bg }}>
+    <div dir="rtl" style={{ width: "100%", maxWidth: 420, margin: "0 auto", minHeight: "100vh", fontFamily: "'Tajawal','Segoe UI',sans-serif", background: T.bg }}>
       <style>{`
         * { box-sizing: border-box; }
         button { cursor: pointer; font-family: inherit; transition: transform 0.12s ease, opacity 0.12s ease, background 0.15s ease, border-color 0.15s ease; }
@@ -302,6 +313,9 @@ export default function SaloniPreview() {
           onTogglePauseToday={() => togglePauseToday(currentBarberId)}
           onChangePin={(newPin) => changeBarberPin(currentBarberId, newPin)}
           onChangePhoto={(photo) => changeBarberPhoto(currentBarberId, photo)}
+          onRequestRenewal={(plan) =>
+            setBarbers((prev) => prev.map((b) => (b.id === currentBarberId ? { ...b, renewalRequest: plan } : b)))
+          }
         />
       )}
 
@@ -324,13 +338,35 @@ export default function SaloniPreview() {
           adminPin={adminPin}
           onChangeAdminPin={changeAdminPin}
           onBack={() => setScreen("welcome")}
-          onApprove={(id) => setBarbers((prev) => prev.map((b) => (b.id === id ? { ...b, approved: true } : b)))}
+          onApprove={(id) =>
+            setBarbers((prev) =>
+              prev.map((b) => {
+                if (b.id !== id) return b;
+                const trialEnd = new Date();
+                trialEnd.setMonth(trialEnd.getMonth() + 1);
+                return { ...b, approved: true, subscriptionUntil: ds(trialEnd) };
+              })
+            )
+          }
           onToggleActive={(id) => setBarbers((prev) => prev.map((b) => (b.id === id ? { ...b, active: !b.active } : b)))}
           onDeleteBarber={(id) => {
             setBarbers((prev) => prev.filter((b) => b.id !== id));
             setAppointments((prev) => prev.filter((a) => a.barberId !== id));
           }}
           onDeleteAppt={(id) => setAppointments((prev) => prev.filter((a) => a.id !== id))}
+          onRenewSubscription={(id, months) =>
+            setBarbers((prev) =>
+              prev.map((b) => {
+                if (b.id !== id) return b;
+                const base = isSubscriptionActive(b) ? new Date(b.subscriptionUntil + "T00:00:00") : new Date();
+                base.setMonth(base.getMonth() + months);
+                return { ...b, subscriptionUntil: ds(base), renewalRequest: null };
+              })
+            )
+          }
+          onStopSubscription={(id) =>
+            setBarbers((prev) => prev.map((b) => (b.id === id ? { ...b, subscriptionUntil: null } : b)))
+          }
         />
       )}
     </div>
@@ -358,6 +394,17 @@ function Logo() {
 }
 
 function WelcomeScreen({ onBarber, onCustomer, onAdmin, darkMode, onToggleDark }) {
+  const pressTimer = React.useRef(null);
+
+  const startPress = () => {
+    pressTimer.current = setTimeout(() => {
+      onAdmin();
+    }, 700);
+  };
+  const cancelPress = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+  };
+
   return (
     <div className="screen-enter" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", padding: "40px 32px", position: "relative" }}>
       <button
@@ -373,7 +420,15 @@ function WelcomeScreen({ onBarber, onCustomer, onAdmin, darkMode, onToggleDark }
         {darkMode ? <Sun size={18} color={T.primary} /> : <Moon size={18} color={T.primary} />}
       </button>
 
-      <div className="logo-breathe" style={{ marginTop: 60 }}>
+      <div
+        className="logo-breathe"
+        style={{ marginTop: 60, cursor: "pointer" }}
+        onMouseDown={startPress}
+        onMouseUp={cancelPress}
+        onMouseLeave={cancelPress}
+        onTouchStart={startPress}
+        onTouchEnd={cancelPress}
+      >
         <Logo />
       </div>
       <h1 style={{ color: T.primary, fontSize: 34, fontWeight: 800, margin: "-18px 0 0" }}>صالوني</h1>
@@ -390,9 +445,6 @@ function WelcomeScreen({ onBarber, onCustomer, onAdmin, darkMode, onToggleDark }
       </p>
 
       <div style={{ height: 40 }} />
-      <button onClick={onAdmin} style={{ background: "none", border: "none", color: T.muted, fontSize: 12.5, marginBottom: 6 }}>
-        دخول الإدارة
-      </button>
       <div style={{ color: T.muted, fontSize: 11 }}>تصميم وتطوير: المهندس سيف بهاء عبد اللطيف</div>
     </div>
   );
@@ -424,7 +476,7 @@ function BarberEntryScreen({ barbers, onBack, onGoRegister, onGoDashboard }) {
   return (
     <div className="screen-enter" style={{ minHeight: "100vh", padding: "24px 24px" }}>
       <BackBtn onClick={onBack} />
-      <div style={{ textAlign: "center", marginTop: 30 }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", marginTop: 30 }}>
         <Scissors size={30} color={T.primary} />
         <h2 style={{ fontSize: 19, margin: "10px 0 2px", color: T.text }}>دخول الحلاق</h2>
         <p style={{ color: T.muted, fontSize: 12.5, marginBottom: 24 }}>أدخل رقم هاتفك ورمزك السري للدخول لحجوزاتك</p>
@@ -484,9 +536,9 @@ function BarberJoinScreen({ onBack, onSubmit }) {
   return (
     <div className="screen-enter" style={{ minHeight: "100vh", padding: "24px 24px" }}>
       {sent ? (
-        <div style={{ textAlign: "center", paddingTop: 80 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", paddingTop: 80 }}>
           <div style={{ animation: "popIn 0.4s ease" }}>
-            <Clock size={40} color={T.primary} />
+            <Scissors size={40} color={T.primary} />
           </div>
           <h2 style={{ marginTop: 16, fontSize: 18, color: T.text }}>تم إرسال طلبك</h2>
           <p style={{ color: T.muted, fontSize: 13, lineHeight: 1.7, padding: "0 10px" }}>
@@ -499,7 +551,7 @@ function BarberJoinScreen({ onBack, onSubmit }) {
       ) : (
         <>
           <BackBtn onClick={onBack} />
-          <div style={{ textAlign: "center", marginBottom: 6 }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 6 }}>
             <PhotoPicker photo={photo} onPick={pickPhoto} />
           </div>
           <h2 style={{ fontSize: 19, margin: "10px 0 2px", color: T.text, textAlign: "center" }}>طلب الانضمام كحلاق</h2>
@@ -560,13 +612,51 @@ function PhotoPicker({ photo, onPick, size = 92, inputId = "barber-photo-input" 
 }
 
 // ================= لوحة الحلاق (حجوزاته) =================
-function BarberDashboard({ barber, appointments, onLogout, onTogglePauseToday, onChangePin, onChangePhoto }) {
+const ADMIN_PHONE = "07713279825";
+
+function BarberDashboard({ barber, appointments, onLogout, onTogglePauseToday, onChangePin, onChangePhoto, onRequestRenewal }) {
   const [showPinForm, setShowPinForm] = useState(false);
   const [oldPin, setOldPin] = useState("");
   const [newPin, setNewPin] = useState("");
   const [pinMsg, setPinMsg] = useState(null); // {type:'ok'|'err', text}
 
   if (!barber) return null;
+
+  if (!isSubscriptionActive(barber)) {
+    return (
+      <div className="screen-enter" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 28px", textAlign: "center" }}>
+        <div style={{ width: 64, height: 64, borderRadius: 32, background: T.dangerSoft, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+          <Lock size={26} color={T.danger} />
+        </div>
+        <h2 style={{ fontSize: 18, color: T.text, margin: "0 0 8px" }}>اشتراكك منتهي</h2>
+        <p style={{ color: T.muted, fontSize: 13.5, lineHeight: 1.7, marginBottom: 20 }}>
+          للاستمرار باستقبال الحجوزات، جدد اشتراكك بالتواصل مع الإدارة
+        </p>
+
+        <div style={{ width: "100%", maxWidth: 300, display: "flex", gap: 10, marginBottom: 22 }}>
+          <div style={{ flex: 1, background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: "12px 8px" }}>
+            <div style={{ fontSize: 12, color: T.muted }}>شهري</div>
+            <div style={{ fontWeight: 800, fontSize: 17, color: T.primary, marginTop: 4 }}>$6.99</div>
+          </div>
+          <div style={{ flex: 1, background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: "12px 8px" }}>
+            <div style={{ fontSize: 12, color: T.muted }}>سنوي</div>
+            <div style={{ fontWeight: 800, fontSize: 17, color: T.good, marginTop: 4 }}>$68.99</div>
+          </div>
+        </div>
+
+        <a
+          href={`tel:${ADMIN_PHONE}`}
+          style={{ width: "100%", maxWidth: 300, background: T.primary, color: "#fff", border: "none", borderRadius: 14, padding: "14px 0", fontWeight: 800, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 12, textDecoration: "none" }}
+        >
+          <Phone size={17} /> اتصال بالإدارة للتجديد
+        </a>
+
+        <OutlineBtn label="خروج" onClick={onLogout} />
+      </div>
+    );
+  }
+
+  const daysRemaining = daysLeft(barber);
   const sorted = [...appointments].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   const today = todayStr();
   const todayAppts = sorted.filter((a) => a.date === today);
@@ -608,6 +698,9 @@ function BarberDashboard({ barber, appointments, onLogout, onTogglePauseToday, o
           <div>
             <div style={{ fontSize: 12, color: T.muted }}>أهلاً بيك</div>
             <div style={{ fontSize: 19, fontWeight: 800, color: T.text }}>{barber.name}</div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: daysRemaining <= 5 ? T.danger : T.good, marginTop: 2 }}>
+              الاشتراك: باقي {daysRemaining} يوم
+            </div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -962,14 +1055,14 @@ function MyAppointments({ appointments, barbers }) {
 }
 
 // ================= لوحة الإدارة =================
-function AdminScreen({ barbers, appointments, adminPin, onChangeAdminPin, onBack, onApprove, onToggleActive, onDeleteBarber, onDeleteAppt }) {
+function AdminScreen({ barbers, appointments, adminPin, onChangeAdminPin, onBack, onApprove, onToggleActive, onDeleteBarber, onDeleteAppt, onRenewSubscription, onStopSubscription }) {
   const [unlocked, setUnlocked] = useState(false);
   const [pin, setPin] = useState("");
-  const [sub, setSub] = useState("appts");
+  const [sub] = useState("barbers");
 
   if (!unlocked) {
     return (
-      <div className="screen-enter" style={{ minHeight: "100vh", padding: "60px 24px", textAlign: "center" }}>
+      <div className="screen-enter" style={{ minHeight: "100vh", padding: "60px 24px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Lock size={30} color={T.primary} />
         <h2 style={{ fontSize: 17, margin: "10px 0 2px", color: T.text }}>دخول الإدارة</h2>
         <p style={{ color: T.muted, fontSize: 12.5, marginBottom: 16 }}>أدخل الرمز الخاص بالإدارة</p>
@@ -994,36 +1087,6 @@ function AdminScreen({ barbers, appointments, adminPin, onChangeAdminPin, onBack
         </div>
         <AdminPinChanger currentPin={adminPin} onChange={onChangeAdminPin} />
       </div>
-
-      <div style={{ display: "flex", gap: 6, background: T.primarySoft, padding: 4, borderRadius: 12, marginBottom: 16 }}>
-        {[{ id: "appts", label: "المواعيد" }, { id: "barbers", label: "الحلاقين" }].map((t) => (
-          <button key={t.id} onClick={() => setSub(t.id)} style={{ flex: 1, padding: "8px 0", borderRadius: 9, border: "none", background: sub === t.id ? T.primary : "transparent", color: sub === t.id ? "#fff" : T.primaryDark, fontWeight: 700, fontSize: 12.5 }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {sub === "appts" && (
-        <>
-          <div style={{ color: T.muted, fontSize: 12.5, marginBottom: 10 }}>{appointments.length} موعد محجوز</div>
-          {appointments.length === 0 && <Empty text="لا توجد مواعيد بعد" />}
-          {[...appointments].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).map((a) => {
-            const b = barbers.find((x) => x.id === a.barberId);
-            return (
-              <Card key={a.id}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 13.5, color: T.text }}>{a.customerName} <span style={{ color: T.muted, fontWeight: 400 }}>• {a.customerPhone}</span></div>
-                    <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>عند: {b?.name || "محذوف"}</div>
-                    <div style={{ fontSize: 12, color: T.primary, fontWeight: 700, marginTop: 3 }}>{a.date} — {to12h(a.time)}</div>
-                  </div>
-                  <button onClick={() => onDeleteAppt(a.id)} style={iconDangerBtn}><Trash2 size={15} /></button>
-                </div>
-              </Card>
-            );
-          })}
-        </>
-      )}
 
       {sub === "barbers" && (
         <>
@@ -1057,6 +1120,8 @@ function AdminScreen({ barbers, appointments, adminPin, onChangeAdminPin, onBack
 
           <div style={{ fontWeight: 800, fontSize: 14, margin: "10px 0 8px", color: T.text }}>الحلاقين</div>
           {approved.map((b) => {
+            const active = isSubscriptionActive(b);
+            const remaining = daysLeft(b);
             return (
               <Card key={b.id}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1070,6 +1135,14 @@ function AdminScreen({ barbers, appointments, adminPin, onChangeAdminPin, onBack
                         </span>
                       </div>
                       <div style={{ fontSize: 11.5, color: T.muted, marginTop: 2 }}>{b.phone} • {b.address}</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: active ? T.good : T.danger, marginTop: 3 }}>
+                        {active ? `الاشتراك: باقي ${remaining} يوم` : "الاشتراك: منتهي / غير مفعّل"}
+                      </div>
+                      {b.renewalRequest && (
+                        <div style={{ fontSize: 10.5, fontWeight: 700, color: T.primaryDark, background: T.primarySoft, display: "inline-block", padding: "2px 8px", borderRadius: 8, marginTop: 4 }}>
+                          طلب تجديد: {b.renewalRequest === "monthly" ? "شهري ($6.99)" : "سنوي ($68.99)"}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1078,6 +1151,28 @@ function AdminScreen({ barbers, appointments, adminPin, onChangeAdminPin, onBack
                     </button>
                     <button onClick={() => onDeleteBarber(b.id)} style={iconDangerBtn}><Trash2 size={15} /></button>
                   </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <button
+                    onClick={() => onRenewSubscription(b.id, 1)}
+                    style={{ flex: 1, background: T.primarySoft, color: T.primaryDark, border: "none", borderRadius: 10, padding: "8px 0", fontWeight: 700, fontSize: 12 }}
+                  >
+                    تجديد شهري
+                  </button>
+                  <button
+                    onClick={() => onRenewSubscription(b.id, 12)}
+                    style={{ flex: 1, background: T.goodSoft, color: T.good, border: "none", borderRadius: 10, padding: "8px 0", fontWeight: 700, fontSize: 12 }}
+                  >
+                    تجديد سنوي
+                  </button>
+                  {active && (
+                    <button
+                      onClick={() => onStopSubscription(b.id)}
+                      style={{ flex: 1, background: T.dangerSoft, color: T.danger, border: "none", borderRadius: 10, padding: "8px 0", fontWeight: 700, fontSize: 12 }}
+                    >
+                      إيقاف
+                    </button>
+                  )}
                 </div>
               </Card>
             );
